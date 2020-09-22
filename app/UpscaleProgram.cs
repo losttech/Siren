@@ -11,6 +11,7 @@
 
     using numpy;
 
+    using tensorflow.core.protobuf.config_pb2;
     using tensorflow.keras.callbacks;
     using tensorflow.keras.layers;
     using tensorflow.keras.losses;
@@ -21,26 +22,38 @@
             GradientEngine.UseEnvironmentFromVariable();
             TensorFlowSetup.Instance.EnsureInitialized();
 
+            dynamic sessionConfig = config_pb2.ConfigProto.CreateInstance();
+            sessionConfig.gpu_options.allow_growth = true;
+            tf.keras.backend.set_session(Session.NewDyn(config: sessionConfig));
+            tf.keras.backend.set_floatx("float64");
+
             // this allows SIREN to oversaturate channels without adding to the loss
             var clampToValidChannelRange = PythonFunctionContainer.Of<Tensor, Tensor>(ClampToValidChannelValueRange);
             var siren = new Sequential(new object[] {
-                new GaussianNoise(stddev: 1f/(128*1024)),
-                new Siren(2, Enumerable.Repeat(256, 5).ToArray()),
+                new GaussianNoise(stddev: 1f/(64*1024)),
+                new Siren(2, Enumerable.Repeat(256, 12).ToArray()),
                 new Dense(units: 4, activation: clampToValidChannelRange),
-                new GaussianNoise(stddev: 1f/128),
+                new GaussianNoise(stddev: 1f/64),
             });
 
             siren.compile(
                 // too slow to converge
-                //optimizer: new SGD(momentum: 0.5),
+                optimizer: new SGD(learning_rate: 0.00006),
                 // lowered learning rate to avoid destabilization
-                optimizer: new Adam(learning_rate: 0.00032),
+                //optimizer: new Adam(learning_rate: 0.00033),
                 loss: new MeanSquaredError());
+
+            const string saveName = "sample-64.weights";
+            const string saveIndexName = saveName + ".index";
 
             if (args.Length == 0) {
                 siren.load_weights("sample.weights");
                 Render(siren, 1034*3, 1536*3, "sample6X.png");
                 return;
+            } else {
+                if (System.IO.File.Exists(saveIndexName)) {
+                    siren.load_weights(saveName);
+                }
             }
 
             foreach (string imagePath in args) {
@@ -52,30 +65,41 @@
                 Debug.Assert(channels == 4);
 
                 var imageSamples = PrepareImage(image);
-
                 var coords = SirenTests.Coord(height, width).ToNumPyArray()
                     .reshape(new[] { width * height, 2 });
+
+                const int cutSize = 200;
+
+                var cut = Enumerable.Range(width*3/4-cutSize/2, cutSize)
+                    .SelectMany(x => Enumerable.Range(height*3/4-cutSize/2, cutSize).Select(y => x + y*width))
+                    .ToNumPyArray();
+
+                using var _ = Python.Runtime.Py.GIL();
+                dynamic numpy = Python.Runtime.Py.Import("numpy");
+                imageSamples = numpy.delete(imageSamples, cut, axis: 0);
+                coords = numpy.delete(coords, cut, axis: 0);
 
                 var upscaleCoords = SirenTests.Coord(height * 2, width * 2).ToNumPyArray();
 
                 var improved = new ImprovedCallback();
                 improved.OnLossImproved += (sender, eventArgs) => {
-                    if (eventArgs.Epoch < 10) return;
+                    if (eventArgs.Epoch < 1000) return;
+                    if (eventArgs.Epoch % 100 != 0 && eventArgs.Epoch < 10000) return;
                     ndarray<float> upscaled = siren.predict(
                         upscaleCoords.reshape(new[] { height * width * 4, 2 }),
-                        batch_size: 1024);
+                        batch_size: 1024).astype("float32");
                     upscaled = (ndarray<float>)upscaled.reshape(new[] { height * 2, width * 2, channels });
                     using var bitmap = ToImage(RestoreImage(upscaled));
                     bitmap.Save("sample4X.png", ImageFormat.Png);
 
-                    siren.save_weights("sample.weights");
+                    siren.save_weights(saveName);
 
                     Console.WriteLine();
                     Console.WriteLine("saved!");
                 };
 
-                siren.fit(coords, imageSamples, epochs: 100, batchSize: 64, stepsPerEpoch: 200,
-                    shuffleMode: TrainingShuffleMode.Batch,
+                siren.fit(coords, imageSamples, epochs: 400000, batchSize: 4096,
+                    shuffleMode: TrainingShuffleMode.Epoch,
                     callbacks: new ICallback[] { improved });
             }
         }
