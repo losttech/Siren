@@ -9,7 +9,6 @@
     using tensorflow;
     using tensorflow.keras;
     using tensorflow.keras.callbacks;
-    using tensorflow.keras.initializers;
     using tensorflow.keras.layers;
     using tensorflow.keras.optimizers;
 
@@ -38,7 +37,6 @@
 
             siren.compile(
                 optimizer: new Adam(learning_rate: 3e-6),
-                //optimizer: new SGD(learning_rate: 1e-4),
                 loss: "mse");
 
             var coords = Enumerable.Range(0, samples.Length)
@@ -79,7 +77,7 @@
         public double LearningRate => 0.02 / this.BatchSize;
         public int Layers { get; set; } = 4;
         public int Width { get; set; } = 512;
-        public int BatchSize { get; set; } = 32 * 1024;
+        public int BatchSize { get; set; } = 64 * 1024;
         public int Epochs { get; set; } = 10000;
 
         public CompressCommand() {

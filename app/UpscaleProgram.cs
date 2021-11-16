@@ -13,7 +13,6 @@
 
     using tensorflow.keras.callbacks;
     using tensorflow.keras.layers;
-    using tensorflow.keras.losses;
     using tensorflow.keras.optimizers;
 
     class UpscaleProgram {
@@ -47,7 +46,7 @@
 
             foreach (string imagePath in args) {
                 using var original = new Bitmap(imagePath);
-                byte[,,] image = ToBytesHWC(original);
+                byte[,,] image = ImageTools.ToBytesHWC(original);
                 int height = image.GetLength(0);
                 int width = image.GetLength(1);
                 int channels = image.GetLength(2);
@@ -142,25 +141,6 @@
             }
 
             return bitmap;
-        }
-
-        static unsafe byte[,,] ToBytesHWC(Bitmap bitmap) {
-            byte[,,] result = new byte[bitmap.Height, bitmap.Width, 4];
-            int rowBytes = bitmap.Width * 4;
-            var rect = new Rectangle(default, new Size(bitmap.Width, bitmap.Height));
-            var data = bitmap.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            try {
-                fixed (byte* dest = result) {
-                    for (int y = 0; y < bitmap.Height; y++) {
-                        var source = data.Scan0 + data.Stride * y;
-                        Buffer.MemoryCopy((byte*)source, destination: &dest[rowBytes * y], rowBytes, rowBytes);
-                    }
-                }
-            } finally {
-                bitmap.UnlockBits(data);
-            }
-
-            return result;
         }
     }
 }

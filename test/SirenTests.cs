@@ -1,5 +1,6 @@
 namespace tensorflow.keras {
     using System;
+    using System.Drawing;
     using System.Linq;
     using numpy;
     using tensorflow.keras.layers;
@@ -10,24 +11,32 @@ namespace tensorflow.keras {
     public partial class SirenTests {
         [Fact]
         public Model CanLearn() {
-            // requires Internet connection
-            (dynamic train, dynamic test) = tf.keras.datasets.fashion_mnist.load_data();
-            ndarray trainImage = NormalizeChannelValue(train.Item1)[0];
-            trainImage = (ndarray)np.expand_dims(trainImage, axis: 2).reshape(new []{ 28*28, 1 });
-            var coords = Coord(28, 28).ToNumPyArray().reshape(new []{28*28, 2});
+            tf.random.set_seed(11241);
+
+            var thisAssembly = System.Reflection.Assembly.GetExecutingAssembly();
+            string wikiLogoName = thisAssembly.GetManifestResourceNames()[0];
+
+            using var wikiLogo = new Bitmap(thisAssembly.GetManifestResourceStream(wikiLogoName));
+            byte[,,] bytesHWC = ToBytesHWC(wikiLogo);
+
+            ndarray trainImage = NormalizeChannelValue(bytesHWC.ToNumPyArray())
+                .reshape(new[] { wikiLogo.Width * wikiLogo.Height, 4 });
+            var coords = Coord(wikiLogo.Height, wikiLogo.Width)
+                .ToNumPyArray().reshape(new []{ wikiLogo.Height * wikiLogo.Width, 2});
 
             var model = new Sequential(new object[] {
                 new Siren(2, Enumerable.Repeat(128, 3).ToArray()),
-                new Dense(units: 1, activation: tf.keras.activations.relu_fn),
+                new Dense(units: 4, activation: tf.keras.activations.relu_fn),
             });
 
             model.compile(
                 optimizer: new Adam(),
                 loss: "mse");
 
-            model.fit(coords, targetValues: trainImage, epochs: 2, batchSize: 28*28, stepsPerEpoch: 1024);
+            model.fit(coords, targetValues: trainImage, epochs: 100, batchSize: wikiLogo.Height * wikiLogo.Width, stepsPerEpoch: 1024);
 
             double testLoss = model.evaluate(coords, trainImage);
+            Assert.True(testLoss < 0.3, testLoss.ToString());
             return model;
         }
     }
